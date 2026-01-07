@@ -6,7 +6,53 @@ import { sendAndConfirmTransaction, prepareTransaction } from "thirdweb";
 import { client } from "@/lib/thirdweb";
 import { defineChain } from "thirdweb/chains";
 
-interface TransactionData {
+// Normalized internal format
+interface NormalizedTransactionData {
+  tx: {
+    data: string;
+    gas: string;
+    gasPrice: string;
+    from: string;
+    to: string;
+    value: string;
+  };
+  quote: {
+    fromAsset: {
+      name: string;
+      currencyCode: string;
+      address: string;
+      decimals: number;
+    };
+    toAsset: {
+      name: string;
+      currencyCode: string;
+      address: string;
+      decimals: number;
+    };
+    fromAmount: string;
+    toAmount: string;
+    warning?: {
+      type: string;
+      message: string;
+      description: string;
+    };
+  };
+  approveTx?: {
+    data: string;
+    gas: string;
+    gasPrice: string;
+    from: string;
+    to: string;
+  };
+  chainId: number;
+  warning?: {
+    code: string;
+    message: string;
+  };
+}
+
+// Format 1: result wrapper with camelCase
+interface SwapServiceHttpTxData {
   result: {
     tx: {
       data: string;
@@ -52,9 +98,105 @@ interface TransactionData {
   };
 }
 
+// Format 2: flat structure with snake_case
+interface SwapServiceGrpcTxData {
+  tx: {
+    data: string;
+    gas: string;
+    gas_price: string;
+    from: string;
+    to: string;
+    value?: string;
+  };
+  quote: {
+    from_asset: {
+      name: string;
+      currency_code: string;
+      address: string;
+      decimals: number;
+    };
+    to_asset: {
+      name: string;
+      currency_code: string;
+      address: string;
+      decimals: number;
+    };
+    from_amount: string;
+    to_amount: string;
+    chain_id: string;
+  };
+  approve_tx?: {
+    data: string;
+    gas: string;
+    gas_price: string;
+    from: string;
+    to: string;
+  };
+  fee?: {
+    amount: string;
+    percentage: string;
+  };
+}
+
+function normalizeTransactionData(data: unknown): NormalizedTransactionData {
+  // Check if it's Format 1 (has result wrapper)
+  if (typeof data === 'object' && data !== null && 'result' in data) {
+    const format1 = data as SwapServiceHttpTxData;
+    return {
+      tx: format1.result.tx,
+      quote: format1.result.quote,
+      approveTx: format1.result.approveTx,
+      chainId: format1.result.chainId,
+      warning: format1.warning,
+    };
+  }
+
+  // Check if it's Format 2 (flat structure with snake_case)
+  if (typeof data === 'object' && data !== null && 'tx' in data && 'quote' in data) {
+    const format2 = data as SwapServiceGrpcTxData;
+    
+    return {
+      tx: {
+        data: format2.tx.data,
+        gas: format2.tx.gas,
+        gasPrice: format2.tx.gas_price,
+        from: format2.tx.from,
+        to: format2.tx.to,
+        value: format2.tx.value || "0",
+      },
+      quote: {
+        fromAsset: {
+          name: format2.quote.from_asset.name,
+          currencyCode: format2.quote.from_asset.currency_code,
+          address: format2.quote.from_asset.address,
+          decimals: format2.quote.from_asset.decimals,
+        },
+        toAsset: {
+          name: format2.quote.to_asset.name,
+          currencyCode: format2.quote.to_asset.currency_code,
+          address: format2.quote.to_asset.address,
+          decimals: format2.quote.to_asset.decimals,
+        },
+        fromAmount: format2.quote.from_amount,
+        toAmount: format2.quote.to_amount,
+      },
+      approveTx: format2.approve_tx ? {
+        data: format2.approve_tx.data,
+        gas: format2.approve_tx.gas,
+        gasPrice: format2.approve_tx.gas_price,
+        from: format2.approve_tx.from,
+        to: format2.approve_tx.to,
+      } : undefined,
+      chainId: parseInt(format2.quote.chain_id, 10),
+    };
+  }
+
+  throw new Error("Unrecognized JSON format");
+}
+
 export default function Home() {
   const [jsonInput, setJsonInput] = useState("");
-  const [parsedData, setParsedData] = useState<TransactionData | null>(null);
+  const [parsedData, setParsedData] = useState<NormalizedTransactionData | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [txStatus, setTxStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -65,10 +207,11 @@ export default function Home() {
   const parseJsonData = () => {
     try {
       setError("");
-      const data = JSON.parse(jsonInput) as TransactionData;
+      const rawData = JSON.parse(jsonInput);
+      const data = normalizeTransactionData(rawData);
       
       // Validate required fields
-      if (!data.result?.tx || !data.result?.chainId) {
+      if (!data.tx || !data.chainId) {
         throw new Error("Invalid transaction data: missing required fields");
       }
       
@@ -91,19 +234,19 @@ export default function Home() {
 
     try {
       // Switch to the correct chain
-      const targetChain = defineChain(parsedData.result.chainId);
+      const targetChain = defineChain(parsedData.chainId);
       await switchChain(targetChain);
       setTxStatus("Switched to correct network...");
 
       // Execute approval transaction if present
-      if (parsedData.result.approveTx) {
+      if (parsedData.approveTx) {
         setTxStatus("Executing approval transaction...");
         
         const approvalTx = prepareTransaction({
-          to: parsedData.result.approveTx.to,
-          data: parsedData.result.approveTx.data as `0x${string}`,
-          gas: BigInt(parsedData.result.approveTx.gas),
-          gasPrice: BigInt(parsedData.result.approveTx.gasPrice),
+          to: parsedData.approveTx.to,
+          data: parsedData.approveTx.data as `0x${string}`,
+          gas: BigInt(parsedData.approveTx.gas),
+          gasPrice: BigInt(parsedData.approveTx.gasPrice),
           client,
           chain: targetChain,
         });
@@ -120,11 +263,11 @@ export default function Home() {
       setTxStatus("Executing main transaction...");
       
       const mainTx = prepareTransaction({
-        to: parsedData.result.tx.to,
-        data: parsedData.result.tx.data as `0x${string}`,
-        value: BigInt(parsedData.result.tx.value),
-        gas: BigInt(parsedData.result.tx.gas),
-        gasPrice: BigInt(parsedData.result.tx.gasPrice),
+        to: parsedData.tx.to,
+        data: parsedData.tx.data as `0x${string}`,
+        value: BigInt(parsedData.tx.value),
+        gas: BigInt(parsedData.tx.gas),
+        gasPrice: BigInt(parsedData.tx.gasPrice),
         client,
         chain: targetChain,
       });
@@ -236,18 +379,18 @@ export default function Home() {
                     <div>
                       <span className="text-gray-600 dark:text-gray-400">From: </span>
                       <span className="font-mono">
-                        {formatAmount(parsedData.result.quote.fromAmount, parsedData.result.quote.fromAsset.decimals)} {parsedData.result.quote.fromAsset.currencyCode}
+                        {formatAmount(parsedData.quote.fromAmount, parsedData.quote.fromAsset.decimals)} {parsedData.quote.fromAsset.currencyCode}
                       </span>
                     </div>
                     <div>
                       <span className="text-gray-600 dark:text-gray-400">To: </span>
                       <span className="font-mono">
-                        {formatAmount(parsedData.result.quote.toAmount, parsedData.result.quote.toAsset.decimals)} {parsedData.result.quote.toAsset.currencyCode}
+                        {formatAmount(parsedData.quote.toAmount, parsedData.quote.toAsset.decimals)} {parsedData.quote.toAsset.currencyCode}
                       </span>
                     </div>
                     <div>
                       <span className="text-gray-600 dark:text-gray-400">Chain ID: </span>
-                      <span className="font-mono">{parsedData.result.chainId}</span>
+                      <span className="font-mono">{parsedData.chainId}</span>
                     </div>
                   </div>
                 </div>
@@ -257,13 +400,13 @@ export default function Home() {
                   <div className="space-y-2 text-sm">
                     <div>
                       <span className="text-gray-600 dark:text-gray-400">To: </span>
-                      <span className="font-mono text-xs break-all">{parsedData.result.tx.to}</span>
+                      <span className="font-mono text-xs break-all">{parsedData.tx.to}</span>
                     </div>
                     <div>
                       <span className="text-gray-600 dark:text-gray-400">Gas: </span>
-                      <span className="font-mono">{parsedData.result.tx.gas}</span>
+                      <span className="font-mono">{parsedData.tx.gas}</span>
                     </div>
-                    {parsedData.result.approveTx && (
+                    {parsedData.approveTx && (
                       <div className="text-green-600 dark:text-green-400">
                         ✓ Includes approval transaction
                       </div>
@@ -273,16 +416,16 @@ export default function Home() {
               </div>
 
               {/* Warnings */}
-              {(parsedData.result.quote.warning || parsedData.warning) && (
+              {(parsedData.quote.warning || parsedData.warning) && (
                 <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                   <div className="flex items-start">
                     <div className="text-yellow-400 mr-2">⚠️</div>
                     <div>
-                      {parsedData.result.quote.warning && (
+                      {parsedData.quote.warning && (
                         <div className="text-yellow-700 dark:text-yellow-300 text-sm mb-1">
-                          <strong>{parsedData.result.quote.warning.message}</strong>
+                          <strong>{parsedData.quote.warning.message}</strong>
                           <br />
-                          {parsedData.result.quote.warning.description}
+                          {parsedData.quote.warning.description}
                         </div>
                       )}
                       {parsedData.warning && (
