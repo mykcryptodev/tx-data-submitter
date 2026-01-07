@@ -101,7 +101,7 @@ export default function Home() {
         
         const approvalTx = prepareTransaction({
           to: parsedData.result.approveTx.to,
-          data: parsedData.result.approveTx.data,
+          data: parsedData.result.approveTx.data as `0x${string}`,
           gas: BigInt(parsedData.result.approveTx.gas),
           gasPrice: BigInt(parsedData.result.approveTx.gasPrice),
           client,
@@ -121,7 +121,7 @@ export default function Home() {
       
       const mainTx = prepareTransaction({
         to: parsedData.result.tx.to,
-        data: parsedData.result.tx.data,
+        data: parsedData.result.tx.data as `0x${string}`,
         value: BigInt(parsedData.result.tx.value),
         gas: BigInt(parsedData.result.tx.gas),
         gasPrice: BigInt(parsedData.result.tx.gasPrice),
@@ -150,7 +150,7 @@ export default function Home() {
     const whole = num / divisor;
     const fraction = num % divisor;
     
-    if (fraction === 0n) {
+    if (fraction === BigInt(0)) {
       return whole.toString();
     }
     
