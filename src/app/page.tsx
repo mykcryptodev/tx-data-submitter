@@ -103,32 +103,61 @@ interface SwapServiceGrpcTxData {
   tx: {
     data: string;
     gas: string;
-    gas_price: string;
+    gas_price?: string;
+    gasPrice?: string;
     from: string;
     to: string;
     value?: string;
   };
   quote: {
-    from_asset: {
+    from_asset?: {
       name: string;
-      currency_code: string;
+      currency_code?: string;
+      currencyCode?: string;
       address: string;
       decimals: number;
     };
-    to_asset: {
+    fromAsset?: {
       name: string;
-      currency_code: string;
+      currency_code?: string;
+      currencyCode?: string;
       address: string;
       decimals: number;
     };
-    from_amount: string;
-    to_amount: string;
-    chain_id: string;
+    to_asset?: {
+      name: string;
+      currency_code?: string;
+      currencyCode?: string;
+      address: string;
+      decimals: number;
+    };
+    toAsset?: {
+      name: string;
+      currency_code?: string;
+      currencyCode?: string;
+      address: string;
+      decimals: number;
+    };
+    from_amount?: string;
+    fromAmount?: string;
+    to_amount?: string;
+    toAmount?: string;
+    chain_id?: string;
+    chainId?: string;
   };
   approve_tx?: {
     data: string;
     gas: string;
-    gas_price: string;
+    gas_price?: string;
+    gasPrice?: string;
+    from: string;
+    to: string;
+  };
+  approveTx?: {
+    data: string;
+    gas: string;
+    gas_price?: string;
+    gasPrice?: string;
     from: string;
     to: string;
   };
@@ -139,8 +168,14 @@ interface SwapServiceGrpcTxData {
 }
 
 function normalizeTransactionData(data: unknown): NormalizedTransactionData {
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/f2f98912-47da-4d5d-b332-56b9bf305e53',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a6bb6f'},body:JSON.stringify({sessionId:'a6bb6f',runId:'initial',hypothesisId:'H2',location:'src/app/page.tsx:normalizeTransactionData:entry',message:'normalize entry shape',data:{isObject:typeof data==='object'&&data!==null,hasResult:typeof data==='object'&&data!==null&&'result' in data,hasTx:typeof data==='object'&&data!==null&&'tx' in data,hasQuote:typeof data==='object'&&data!==null&&'quote' in data},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   // Check if it's Format 1 (has result wrapper)
   if (typeof data === 'object' && data !== null && 'result' in data) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/f2f98912-47da-4d5d-b332-56b9bf305e53',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a6bb6f'},body:JSON.stringify({sessionId:'a6bb6f',runId:'initial',hypothesisId:'H2',location:'src/app/page.tsx:normalizeTransactionData:format1',message:'format1 branch selected',data:{branch:'format1'},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const format1 = data as SwapServiceHttpTxData;
     return {
       tx: format1.result.tx,
@@ -154,40 +189,55 @@ function normalizeTransactionData(data: unknown): NormalizedTransactionData {
   // Check if it's Format 2 (flat structure with snake_case)
   if (typeof data === 'object' && data !== null && 'tx' in data && 'quote' in data) {
     const format2 = data as SwapServiceGrpcTxData;
-    
+    const quoteUnknown = (format2 as unknown as { quote?: Record<string, unknown> }).quote;
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/f2f98912-47da-4d5d-b332-56b9bf305e53',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a6bb6f'},body:JSON.stringify({sessionId:'a6bb6f',runId:'initial',hypothesisId:'H1',location:'src/app/page.tsx:normalizeTransactionData:format2',message:'format2 branch selected with quote keys',data:{branch:'format2',hasFromAsset:!!quoteUnknown&&'from_asset' in quoteUnknown,hasFromAssetCamel:!!quoteUnknown&&'fromAsset' in quoteUnknown,hasToAsset:!!quoteUnknown&&'to_asset' in quoteUnknown,hasToAssetCamel:!!quoteUnknown&&'toAsset' in quoteUnknown,hasChainIdSnake:!!quoteUnknown&&'chain_id' in quoteUnknown,hasChainIdCamel:!!quoteUnknown&&'chainId' in quoteUnknown},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    const fromAsset = format2.quote.from_asset ?? format2.quote.fromAsset;
+    const toAsset = format2.quote.to_asset ?? format2.quote.toAsset;
+    const chainIdRaw = format2.quote.chain_id ?? format2.quote.chainId;
+    const fromAmount = format2.quote.from_amount ?? format2.quote.fromAmount;
+    const toAmount = format2.quote.to_amount ?? format2.quote.toAmount;
+    const approveTx = format2.approve_tx ?? format2.approveTx;
+
+    if (!fromAsset || !toAsset || !chainIdRaw || !fromAmount || !toAmount) {
+      throw new Error("Invalid quote format: missing required quote fields");
+    }
+
     return {
       tx: {
         data: format2.tx.data,
         gas: format2.tx.gas,
-        gasPrice: format2.tx.gas_price,
+        gasPrice: format2.tx.gas_price ?? format2.tx.gasPrice ?? "0",
         from: format2.tx.from,
         to: format2.tx.to,
         value: format2.tx.value || "0",
       },
       quote: {
         fromAsset: {
-          name: format2.quote.from_asset.name,
-          currencyCode: format2.quote.from_asset.currency_code,
-          address: format2.quote.from_asset.address,
-          decimals: format2.quote.from_asset.decimals,
+          name: fromAsset.name,
+          currencyCode: fromAsset.currency_code ?? fromAsset.currencyCode ?? "",
+          address: fromAsset.address,
+          decimals: fromAsset.decimals,
         },
         toAsset: {
-          name: format2.quote.to_asset.name,
-          currencyCode: format2.quote.to_asset.currency_code,
-          address: format2.quote.to_asset.address,
-          decimals: format2.quote.to_asset.decimals,
+          name: toAsset.name,
+          currencyCode: toAsset.currency_code ?? toAsset.currencyCode ?? "",
+          address: toAsset.address,
+          decimals: toAsset.decimals,
         },
-        fromAmount: format2.quote.from_amount,
-        toAmount: format2.quote.to_amount,
+        fromAmount,
+        toAmount,
       },
-      approveTx: format2.approve_tx ? {
-        data: format2.approve_tx.data,
-        gas: format2.approve_tx.gas,
-        gasPrice: format2.approve_tx.gas_price,
-        from: format2.approve_tx.from,
-        to: format2.approve_tx.to,
+      approveTx: approveTx ? {
+        data: approveTx.data,
+        gas: approveTx.gas,
+        gasPrice: approveTx.gas_price ?? approveTx.gasPrice ?? "0",
+        from: approveTx.from,
+        to: approveTx.to,
       } : undefined,
-      chainId: parseInt(format2.quote.chain_id, 10),
+      chainId: parseInt(chainIdRaw, 10),
     };
   }
 
@@ -208,15 +258,24 @@ export default function Home() {
     try {
       setError("");
       const rawData = JSON.parse(jsonInput);
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/f2f98912-47da-4d5d-b332-56b9bf305e53',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a6bb6f'},body:JSON.stringify({sessionId:'a6bb6f',runId:'initial',hypothesisId:'H3',location:'src/app/page.tsx:parseJsonData:afterJsonParse',message:'json parsed before normalize',data:{topLevelKeys:typeof rawData==='object'&&rawData!==null?Object.keys(rawData as Record<string, unknown>):[]},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const data = normalizeTransactionData(rawData);
       
       // Validate required fields
       if (!data.tx || !data.chainId) {
         throw new Error("Invalid transaction data: missing required fields");
       }
-      
+
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/f2f98912-47da-4d5d-b332-56b9bf305e53',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a6bb6f'},body:JSON.stringify({sessionId:'a6bb6f',runId:'initial',hypothesisId:'H4',location:'src/app/page.tsx:parseJsonData:normalized',message:'normalized data ready',data:{chainId:data.chainId,fromAssetName:data.quote.fromAsset.name,toAssetName:data.quote.toAsset.name},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setParsedData(data);
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/f2f98912-47da-4d5d-b332-56b9bf305e53',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a6bb6f'},body:JSON.stringify({sessionId:'a6bb6f',runId:'initial',hypothesisId:'H1',location:'src/app/page.tsx:parseJsonData:catch',message:'parse or normalize failed',data:{errorMessage:err instanceof Error?err.message:'Unknown error'},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setError(`Failed to parse JSON: ${err instanceof Error ? err.message : 'Unknown error'}`);
       setParsedData(null);
     }
